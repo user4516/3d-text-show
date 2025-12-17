@@ -5,7 +5,9 @@
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
   <meta http-equiv="Pragma" content="no-cache">
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,minimum-scale=1,viewport-fit=cover">
-  <title>前程似锦哦</title>
+  <!-- 核心修改：页面标题改为「祝你前程似锦~」 -->
+  <title>祝你前程似锦~</title>
+  <!-- 优先加载Three.js核心库，确保全局对象先创建 -->
   <script src="https://cdn.jsdelivr.net/npm/three@0.140.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.140.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://res2.wx.qq.com/open/js/jweixin-1.6.0.js"></script>
@@ -129,463 +131,504 @@
     };
   </script>
 
-  <!-- 3. 核心3D逻辑（高密度+中小字为主+随机大小） -->
+  <!-- 3. 核心3D逻辑（增加库加载检测+延迟执行） -->
   <script>
-    // 核心变量
-    let scene, camera, renderer, controls;
-    const textMeshes = []; // 活跃文字列表
-    const textList = ["学业有成", "步履不停", "奔赴山海", "未来可期", "前途似锦"];
-    let currentRGB = { r: 255, g: 0, b: 0 }; // 全局RGB（数值型）
-    let colorPhase = 0; 
-
-    // 核心配置（高密度优化：增加数量+缩小间距+降低速度）
-    const config = {
-      // 文字分布（缩小间距，扩大覆盖范围）
-      centerRatio: 0.8, // 80%文字在中心（更集中）
-      centerXRange: { min: -25, max: 25 }, // 中心区域扩大
-      sideXRange: { min: -50, max: 50 },   // 侧边区域扩大
-      zRange: { min: -50, max: 10 },       // Z轴范围扩大（前后层次更多）
-      // 持续刷新（提升密度核心配置）
-      maxActiveText: 80, // 最大活跃文字数（从40→80，翻倍）
-      minActiveText: 75, // 保底阈值（从35→75）
-      spawnInterval: 50, // 生成间隔（从100→50，更快补位）
-      deleteYThreshold: 80, // 删除高度（从60→80，文字停留更久）
-      // 字体大小（中小字为主，微调范围）
-      fontSize: {
-        small: { min: 50, max: 80, weight: 0.6 },  // 小字：60%
-        medium: { min: 80, max: 110, weight: 0.3 }, // 中字：30%
-        large: { min: 110, max: 140, weight: 0.1 }  // 大字：10%
-      },
-      // 几何尺寸（匹配字体大小）
-      geoSize: {
-        small: { min: 15, max: 30, weight: 0.6 },
-        medium: { min: 30, max: 40, weight: 0.3 },
-        large: { min: 40, max: 50, weight: 0.1 }
-      },
-      // 速度配置（降低速度，文字停留更久）
-      centerSpeedRange: { min: 0.3, max: 0.7 }, // 中心文字更慢
-      sideSpeedRange: { min: 0.25, max: 0.5 },   // 侧边文字更慢
-      // 颜色渐变
-      colorSpeed: 0.004
-    };
-
-    // 加载相关变量
-    const loadingEl = document.getElementById('loading');
-    const loadingTextEl = loadingEl.querySelector('.loading-text');
-    const loadingProgressEl = loadingEl.querySelector('.loading-progress');
-    const webglErrorEl = document.getElementById('webgl-error');
-    let loadProgress = 0;
-    const loadTimeout = 10000; 
-
-    // 颜色渐变表（数值型RGB）
-    const colorGradients = [
-      { r: 255, g: 0, b: 0 },    // 红
-      { r: 255, g: 127, b: 0 }, // 橙
-      { r: 255, g: 255, b: 0 }, // 黄
-      { r: 0, g: 255, b: 0 },    // 绿
-      { r: 0, g: 255, b: 255 }, // 青
-      { r: 0, g: 0, b: 255 },    // 蓝
-      { r: 127, g: 0, b: 255 }, // 紫
-      { r: 255, g: 0, b: 0 }     // 红（闭环）
-    ];
-
-    // 检测WebGL支持
-    function checkWebGL() {
-      try {
-        const canvas = document.createElement('canvas');
-        return !!(window.WebGLRenderingContext && (canvas.getContext('webgl') || canvas.getContext('experimental-webgl')));
-      } catch (e) {
-        return false;
-      }
-    }
-
-    // 更新加载进度
-    function updateLoadProgress(progress) {
-      loadProgress = Math.min(progress, 100);
-      loadingProgressEl.textContent = `${loadProgress}%`;
-      if (loadProgress >= 100) {
-        loadingEl.style.opacity = 0;
-        loadingEl.style.transition = 'opacity 0.5s ease';
+    // 等待Three.js加载完成后再执行核心逻辑
+    function waitForThreeLoaded() {
+      return new Promise((resolve, reject) => {
+        const checkInterval = setInterval(() => {
+          if (window.THREE && window.THREE.Scene) {
+            clearInterval(checkInterval);
+            resolve();
+          }
+        }, 100);
+        
+        // 超时兜底（10秒）
         setTimeout(() => {
-          loadingEl.style.display = 'none';
-        }, 500);
-      }
+          clearInterval(checkInterval);
+          reject(new Error("Three.js库加载超时"));
+        }, 10000);
+      });
     }
 
-    // 生成偏向中心的X坐标（更密集）
-    function getCenterBiasedX(isCenter) {
-      if (isCenter) {
-        return Math.random() * (config.centerXRange.max - config.centerXRange.min) + config.centerXRange.min;
-      } else {
-        const sideX = Math.random() * (config.sideXRange.max - config.sideXRange.min) + config.sideXRange.min;
-        if (sideX > config.centerXRange.min && sideX < config.centerXRange.max) {
-          return sideX < 0 ? config.centerXRange.min - 3 : config.centerXRange.max + 3;
+    // 核心逻辑封装
+    async function init3D() {
+      // 核心变量
+      let scene, camera, renderer, controls;
+      const textMeshes = []; // 活跃文字列表
+      const textList = ["星河入梦", "步履不停", "奔赴山海", "未来可期", "人间值得"];
+      let currentRGB = { r: 255, g: 0, b: 0 }; // 全局RGB（数值型）
+      let colorPhase = 0; 
+
+      // 核心配置（高密度优化：增加数量+缩小间距+降低速度）
+      const config = {
+        // 文字分布（缩小间距，扩大覆盖范围）
+        centerRatio: 0.8, // 80%文字在中心（更集中）
+        centerXRange: { min: -25, max: 25 }, // 中心区域扩大
+        sideXRange: { min: -50, max: 50 },   // 侧边区域扩大
+        zRange: { min: -50, max: 10 },       // Z轴范围扩大（前后层次更多）
+        // 持续刷新（提升密度核心配置）
+        maxActiveText: 80, // 最大活跃文字数（从40→80，翻倍）
+        minActiveText: 75, // 保底阈值（从35→75）
+        spawnInterval: 50, // 生成间隔（从100→50，更快补位）
+        deleteYThreshold: 80, // 删除高度（从60→80，文字停留更久）
+        // 字体大小（中小字为主，微调范围）
+        fontSize: {
+          small: { min: 50, max: 80, weight: 0.6 },  // 小字：60%
+          medium: { min: 80, max: 110, weight: 0.3 }, // 中字：30%
+          large: { min: 110, max: 140, weight: 0.1 }  // 大字：10%
+        },
+        // 几何尺寸（匹配字体大小）
+        geoSize: {
+          small: { min: 15, max: 30, weight: 0.6 },
+          medium: { min: 30, max: 40, weight: 0.3 },
+          large: { min: 40, max: 50, weight: 0.1 }
+        },
+        // 速度配置（降低速度，文字停留更久）
+        centerSpeedRange: { min: 0.3, max: 0.6 }, // 中心文字更慢
+        sideSpeedRange: { min: 0.15, max: 0.25 },   // 侧边文字更慢
+        // 颜色渐变
+        colorSpeed: 0.004
+      };
+
+      // 加载相关变量
+      const loadingEl = document.getElementById('loading');
+      const loadingTextEl = loadingEl.querySelector('.loading-text');
+      const loadingProgressEl = loadingEl.querySelector('.loading-progress');
+      const webglErrorEl = document.getElementById('webgl-error');
+      let loadProgress = 0;
+      const loadTimeout = 10000; 
+
+      // 颜色渐变表（数值型RGB）
+      const colorGradients = [
+        { r: 255, g: 0, b: 0 },    // 红
+        { r: 255, g: 127, b: 0 }, // 橙
+        { r: 255, g: 255, b: 0 }, // 黄
+        { r: 0, g: 255, b: 0 },    // 绿
+        { r: 0, g: 255, b: 255 }, // 青
+        { r: 0, g: 0, b: 255 },    // 蓝
+        { r: 127, g: 0, b: 255 }, // 紫
+        { r: 255, g: 0, b: 0 }     // 红（闭环）
+      ];
+
+      // 检测WebGL支持
+      function checkWebGL() {
+        try {
+          const canvas = document.createElement('canvas');
+          return !!(window.WebGLRenderingContext && (canvas.getContext('webgl') || canvas.getContext('experimental-webgl')));
+        } catch (e) {
+          return false;
         }
-        return sideX;
       }
-    }
 
-    // 按权重随机选择尺寸类型（小字60%、中字30%、大字10%）
-    function getSizeType() {
-      const random = Math.random();
-      if (random < config.fontSize.small.weight) {
-        return 'small';
-      } else if (random < config.fontSize.small.weight + config.fontSize.medium.weight) {
-        return 'medium';
-      } else {
-        return 'large';
+      // 更新加载进度
+      function updateLoadProgress(progress) {
+        loadProgress = Math.min(progress, 100);
+        loadingProgressEl.textContent = `${loadProgress}%`;
+        if (loadProgress >= 100) {
+          loadingEl.style.opacity = 0;
+          loadingEl.style.transition = 'opacity 0.5s ease';
+          setTimeout(() => {
+            loadingEl.style.display = 'none';
+          }, 500);
+        }
       }
-    }
 
-    // 生成随机字号（按尺寸类型权重）
-    function getRandomFontSize() {
-      const sizeType = getSizeType();
-      const range = config.fontSize[sizeType];
-      return Math.floor(Math.random() * (range.max - range.min + 1) + range.min);
-    }
-
-    // 生成随机几何尺寸（按尺寸类型权重）
-    function getRandomGeoSize() {
-      const sizeType = getSizeType();
-      const range = config.geoSize[sizeType];
-      return Math.round(Math.random() * (range.max - range.min) * 10) / 10 + range.min;
-    }
-
-    // 生成随机速度（关联文字大小：大字慢，小字快）
-    function getRandomSpeed(isCenter, geoSize) {
-      const speedFactor = 1 - (geoSize - config.geoSize.small.min) / (config.geoSize.large.max - config.geoSize.small.min);
-      let baseMin, baseMax;
-      if (isCenter) {
-        baseMin = config.centerSpeedRange.min;
-        baseMax = config.centerSpeedRange.max;
-      } else {
-        baseMin = config.sideSpeedRange.min;
-        baseMax = config.sideSpeedRange.max;
+      // 生成偏向中心的X坐标（更密集）
+      function getCenterBiasedX(isCenter) {
+        if (isCenter) {
+          return Math.random() * (config.centerXRange.max - config.centerXRange.min) + config.centerXRange.min;
+        } else {
+          const sideX = Math.random() * (config.sideXRange.max - config.sideXRange.min) + config.sideXRange.min;
+          if (sideX > config.centerXRange.min && sideX < config.centerXRange.max) {
+            return sideX < 0 ? config.centerXRange.min - 3 : config.centerXRange.max + 3;
+          }
+          return sideX;
+        }
       }
-      return baseMin + (baseMax - baseMin) * speedFactor * Math.random();
-    }
 
-    // 通用随机函数（优化初始位置，更密集）
-    function getRandomZ() { return Math.random() * (config.zRange.max - config.zRange.min) + config.zRange.min; }
-    function getRandomY() { return Math.random() * -200; } // 初始Y范围扩大（-200~0），底部更密集
-    function getRandomText() { return textList[Math.floor(Math.random() * textList.length)]; }
-    function isCenterText() { return Math.random() < config.centerRatio; }
+      // 按权重随机选择尺寸类型（小字60%、中字30%、大字10%）
+      function getSizeType() {
+        const random = Math.random();
+        if (random < config.fontSize.small.weight) {
+          return 'small';
+        } else if (random < config.fontSize.small.weight + config.fontSize.medium.weight) {
+          return 'medium';
+        } else {
+          return 'large';
+        }
+      }
 
-    // 更新全局RGB（数值型，无误差）
-    function updateGlobalRGB() {
-      colorPhase += config.colorSpeed;
-      if (colorPhase > 1) colorPhase = 0;
-      
-      const gradientIndex = Math.floor(colorPhase * (colorGradients.length - 1));
-      const nextIndex = (gradientIndex + 1) % (colorGradients.length - 1);
-      const blend = (colorPhase * (colorGradients.length - 1)) - gradientIndex;
-      
-      const from = colorGradients[gradientIndex];
-      const to = colorGradients[nextIndex];
-      currentRGB.r = Math.floor(from.r + blend * (to.r - from.r));
-      currentRGB.g = Math.floor(from.g + blend * (to.g - from.g));
-      currentRGB.b = Math.floor(from.b + blend * (to.b - from.b));
-    }
+      // 生成随机字号（按尺寸类型权重）
+      function getRandomFontSize() {
+        const sizeType = getSizeType();
+        const range = config.fontSize[sizeType];
+        return Math.floor(Math.random() * (range.max - range.min + 1) + range.min);
+      }
 
-    // 创建文字纹理（适配随机字号）
-    function createTextTexture(text, fontSize) {
-      const canvasWidth = fontSize * text.length * 2.2; // 缩小画布冗余，文字更紧凑
-      const canvasHeight = fontSize * 2.8;
-      const canvas = document.createElement('canvas');
-      canvas.width = canvasWidth;
-      canvas.height = canvasHeight;
-      const ctx = canvas.getContext('2d');
-      
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.font = `bold ${fontSize}px Microsoft Yahei`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillStyle = `rgb(${currentRGB.r}, ${currentRGB.g}, ${currentRGB.b})`;
-      ctx.fillText(text, canvas.width / 2, canvas.height / 2);
-      
-      const texture = new THREE.CanvasTexture(canvas);
-      texture.minFilter = THREE.LinearFilter;
-      texture.magFilter = THREE.LinearFilter;
-      return { texture, canvas, ctx };
-    }
+      // 生成随机几何尺寸（按尺寸类型权重）
+      function getRandomGeoSize() {
+        const sizeType = getSizeType();
+        const range = config.geoSize[sizeType];
+        return Math.round(Math.random() * (range.max - range.min) * 10) / 10 + range.min;
+      }
 
-    // 创建单个文字（高密度+中小字为主）
-    function createSingleText() {
-      const isCenter = isCenterText();
-      const text = getRandomText();
-      const fontSize = getRandomFontSize();
-      const geoWidth = getRandomGeoSize();
-      const geoHeight = geoWidth / 4;
+      // 生成随机速度（关联文字大小：大字慢，小字快）
+      function getRandomSpeed(isCenter, geoSize) {
+        const speedFactor = 1 - (geoSize - config.geoSize.small.min) / (config.geoSize.large.max - config.geoSize.small.min);
+        let baseMin, baseMax;
+        if (isCenter) {
+          baseMin = config.centerSpeedRange.min;
+          baseMax = config.centerSpeedRange.max;
+        } else {
+          baseMin = config.sideSpeedRange.min;
+          baseMax = config.sideSpeedRange.max;
+        }
+        return baseMin + (baseMax - baseMin) * speedFactor * Math.random();
+      }
 
-      try {
-        const textureData = createTextTexture(text, fontSize);
-        const material = new THREE.MeshBasicMaterial({
-          map: textureData.texture,
-          transparent: true,
-          opacity: 1,
-          side: THREE.DoubleSide,
-          alphaTest: 0.01,
-          blending: THREE.NormalBlending,
-          precision: "highp"
-        });
+      // 通用随机函数（优化初始位置，更密集）
+      function getRandomZ() { return Math.random() * (config.zRange.max - config.zRange.min) + config.zRange.min; }
+      function getRandomY() { return Math.random() * -200; } // 初始Y范围扩大（-200~0），底部更密集
+      function getRandomText() { return textList[Math.floor(Math.random() * textList.length)]; }
+      function isCenterText() { return Math.random() < config.centerRatio; }
 
-        const geometry = new THREE.PlaneGeometry(geoWidth, geoHeight);
-        const mesh = new THREE.Mesh(geometry, material);
+      // 更新全局RGB（数值型，无误差）
+      function updateGlobalRGB() {
+        colorPhase += config.colorSpeed;
+        if (colorPhase > 1) colorPhase = 0;
         
-        // 初始位置更密集，无明显空隙
-        mesh.position.set(
-          getCenterBiasedX(isCenter),
-          getRandomY(),
-          getRandomZ()
-        );
+        const gradientIndex = Math.floor(colorPhase * (colorGradients.length - 1));
+        const nextIndex = (gradientIndex + 1) % (colorGradients.length - 1);
+        const blend = (colorPhase * (colorGradients.length - 1)) - gradientIndex;
         
-        mesh.userData = {
-          isCenter: isCenter,
-          speed: getRandomSpeed(isCenter, geoWidth),
-          text: text,
-          canvas: textureData.canvas,
-          ctx: textureData.ctx,
-          fontSize: fontSize,
-          geoWidth: geoWidth,
-          geoHeight: geoHeight
-        };
+        const from = colorGradients[gradientIndex];
+        const to = colorGradients[nextIndex];
+        currentRGB.r = Math.floor(from.r + blend * (to.r - from.r));
+        currentRGB.g = Math.floor(from.g + blend * (to.g - from.g));
+        currentRGB.b = Math.floor(from.b + blend * (to.b - from.b));
+      }
 
-        scene.add(mesh);
-        textMeshes.push(mesh);
-        return mesh;
-      } catch (e) {
-        // 兜底方块（匹配高密度配置）
+      // 创建文字纹理（适配随机字号）
+      function createTextTexture(text, fontSize) {
+        const canvasWidth = fontSize * text.length * 2.2; // 缩小画布冗余，文字更紧凑
+        const canvasHeight = fontSize * 2.8;
+        const canvas = document.createElement('canvas');
+        canvas.width = canvasWidth;
+        canvas.height = canvasHeight;
+        const ctx = canvas.getContext('2d');
+        
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.font = `bold ${fontSize}px Microsoft Yahei`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = `rgb(${currentRGB.r}, ${currentRGB.g}, ${currentRGB.b})`;
+        ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+        
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.minFilter = THREE.LinearFilter;
+        texture.magFilter = THREE.LinearFilter;
+        return { texture, canvas, ctx };
+      }
+
+      // 创建单个文字（高密度+中小字为主）
+      function createSingleText() {
+        const isCenter = isCenterText();
+        const text = getRandomText();
+        const fontSize = getRandomFontSize();
         const geoWidth = getRandomGeoSize();
         const geoHeight = geoWidth / 4;
-        const geometry = new THREE.PlaneGeometry(geoWidth, geoHeight);
-        const material = new THREE.MeshBasicMaterial({
-          color: new THREE.Color(currentRGB.r / 255, currentRGB.g / 255, currentRGB.b / 255),
-          transparent: true,
-          opacity: 1,
-          blending: THREE.NormalBlending,
-          precision: "highp"
-        });
-        const mesh = new THREE.Mesh(geometry, material);
-        
-        mesh.position.set(
-          getCenterBiasedX(isCenter),
-          getRandomY(),
-          getRandomZ()
-        );
-        
-        mesh.userData = {
-          isCenter: isCenter,
-          speed: getRandomSpeed(isCenter, geoWidth),
-          text: text,
-          fontSize: fontSize,
-          geoWidth: geoWidth,
-          geoHeight: geoHeight
-        };
-        
-        scene.add(mesh);
-        textMeshes.push(mesh);
-        return mesh;
-      }
-    }
 
-    // 持续生成新文字（更快补位，保持高密度）
-    function spawnNewText() {
-      const needAdd = config.maxActiveText - textMeshes.length;
-      if (needAdd > 0) {
-        // 批量补位，一次最多补8个（更快填满）
-        const addCount = Math.min(needAdd, 8);
-        for (let i = 0; i < addCount; i++) {
-          createSingleText();
-        }
-      }
-    }
-
-    // 删除指定文字（释放资源）
-    function deleteText(mesh) {
-      const index = textMeshes.indexOf(mesh);
-      if (index > -1) {
-        textMeshes.splice(index, 1);
-        scene.remove(mesh);
-        if (mesh.geometry) mesh.geometry.dispose();
-        if (mesh.material) {
-          if (mesh.material.map) mesh.material.map.dispose();
-          mesh.material.dispose();
-        }
-      }
-    }
-
-    // 初始化3D场景
-    function initScene() {
-      updateLoadProgress(20);
-      scene = new THREE.Scene();
-      scene.background = new THREE.Color(0x000000);
-
-      updateLoadProgress(30);
-      camera = new THREE.PerspectiveCamera(
-        60, // 视角扩大（从55→60），能看到更多文字
-        window.innerWidth / window.innerHeight,
-        0.1,
-        1000
-      );
-      camera.position.set(0, 0, 60); // 相机后移，视野更宽
-
-      updateLoadProgress(40);
-      try {
-        renderer = new THREE.WebGLRenderer({
-          antialias: true,
-          alpha: false,
-          powerPreference: "high-performance", // 优先性能，适配高密度渲染
-          precision: "highp"
-        });
-      } catch (e) {
-        renderer = new THREE.WebGLRenderer({ antialias: false, precision: "highp" });
-      }
-      renderer.setSize(window.innerWidth, window.innerHeight);
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5)); // 限制像素比，提升性能
-      document.getElementById('container').appendChild(renderer.domElement);
-
-      updateLoadProgress(50);
-      controls = (window.OrbitControls || THREE.OrbitControls) 
-        ? new (window.OrbitControls || THREE.OrbitControls)(camera, renderer.domElement)
-        : { update: () => {} };
-      controls.enableDamping = true;
-      controls.dampingFactor = 0.05;
-      controls.minDistance = 50; // 相机最小距离后移，避免太近看不到整体
-      controls.maxDistance = 100;
-      controls.enableRotate = true;
-      controls.enableZoom = true;
-      controls.enablePan = true;
-
-      updateLoadProgress(60);
-      // 增强环境光，文字更清晰
-      const ambientLight = new THREE.AmbientLight(0xffffff, 2.0);
-      scene.add(ambientLight);
-
-      updateLoadProgress(70);
-      // 创建更密集的星空背景
-      function createStars() {
         try {
-          const starsGeometry = new THREE.BufferGeometry();
-          const starsCount = 3000; // 星星数量翻倍（从1500→3000）
-          const positions = new Float32Array(starsCount * 3);
-          
-          for (let i = 0; i < starsCount * 3; i += 3) {
-            positions[i] = (Math.random() - 0.5) * 1500;
-            positions[i + 1] = (Math.random() - 0.5) * 1500;
-            positions[i + 2] = (Math.random() - 0.5) * 1500;
-          }
-          
-          starsGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-          const starsMaterial = new THREE.PointsMaterial({
-            color: 0xffffff,
-            size: 0.9, // 星星稍大
-            sizeAttenuation: true,
-            opacity: 0.6
+          const textureData = createTextTexture(text, fontSize);
+          const material = new THREE.MeshBasicMaterial({
+            map: textureData.texture,
+            transparent: true,
+            opacity: 1,
+            side: THREE.DoubleSide,
+            alphaTest: 0.01,
+            blending: THREE.NormalBlending,
+            precision: "highp"
           });
-          const stars = new THREE.Points(starsGeometry, starsMaterial);
-          scene.add(stars);
+
+          const geometry = new THREE.PlaneGeometry(geoWidth, geoHeight);
+          const mesh = new THREE.Mesh(geometry, material);
+          
+          // 初始位置更密集，无明显空隙
+          mesh.position.set(
+            getCenterBiasedX(isCenter),
+            getRandomY(),
+            getRandomZ()
+          );
+          
+          mesh.userData = {
+            isCenter: isCenter,
+            speed: getRandomSpeed(isCenter, geoWidth),
+            text: text,
+            canvas: textureData.canvas,
+            ctx: textureData.ctx,
+            fontSize: fontSize,
+            geoWidth: geoWidth,
+            geoHeight: geoHeight
+          };
+
+          scene.add(mesh);
+          textMeshes.push(mesh);
+          return mesh;
         } catch (e) {
-          console.log('星空创建失败:', e);
+          // 兜底方块（匹配高密度配置）
+          const geoWidth = getRandomGeoSize();
+          const geoHeight = geoWidth / 4;
+          const geometry = new THREE.PlaneGeometry(geoWidth, geoHeight);
+          const material = new THREE.MeshBasicMaterial({
+            color: new THREE.Color(currentRGB.r / 255, currentRGB.g / 255, currentRGB.b / 255),
+            transparent: true,
+            opacity: 1,
+            blending: THREE.NormalBlending,
+            precision: "highp"
+          });
+          const mesh = new THREE.Mesh(geometry, material);
+          
+          mesh.position.set(
+            getCenterBiasedX(isCenter),
+            getRandomY(),
+            getRandomZ()
+          );
+          
+          mesh.userData = {
+            isCenter: isCenter,
+            speed: getRandomSpeed(isCenter, geoWidth),
+            text: text,
+            fontSize: fontSize,
+            geoWidth: geoWidth,
+            geoHeight: geoHeight
+          };
+          
+          scene.add(mesh);
+          textMeshes.push(mesh);
+          return mesh;
         }
       }
-      createStars();
 
-      updateLoadProgress(80);
-      // 初始化高密度文字（80个）
-      for (let i = 0; i < config.maxActiveText; i++) {
-        createSingleText();
-        updateLoadProgress(80 + (i + 1) * 0.25); // 调整进度计算，避免溢出
+      // 持续生成新文字（更快补位，保持高密度）
+      function spawnNewText() {
+        const needAdd = config.maxActiveText - textMeshes.length;
+        if (needAdd > 0) {
+          // 批量补位，一次最多补8个（更快填满）
+          const addCount = Math.min(needAdd, 8);
+          for (let i = 0; i < addCount; i++) {
+            createSingleText();
+          }
+        }
       }
 
-      updateLoadProgress(100);
-      // 双重定时器，更快补位
-      setInterval(spawnNewText, config.spawnInterval);
-      setInterval(() => {
-        if (textMeshes.length < config.minActiveText) {
-          spawnNewText();
+      // 删除指定文字（释放资源）
+      function deleteText(mesh) {
+        const index = textMeshes.indexOf(mesh);
+        if (index > -1) {
+          textMeshes.splice(index, 1);
+          scene.remove(mesh);
+          if (mesh.geometry) mesh.geometry.dispose();
+          if (mesh.material) {
+            if (mesh.material.map) mesh.material.map.dispose();
+            mesh.material.dispose();
+          }
         }
-      }, 30); // 保底检测间隔缩短到30ms
+      }
 
-      // 窗口适配
-      window.addEventListener('resize', onWindowResize);
+      // 初始化3D场景
+      function initScene() {
+        updateLoadProgress(20);
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x000000);
+
+        updateLoadProgress(30);
+        camera = new THREE.PerspectiveCamera(
+          60, // 视角扩大（从55→60），能看到更多文字
+          window.innerWidth / window.innerHeight,
+          0.1,
+          1000
+        );
+        camera.position.set(0, 0, 60); // 相机后移，视野更宽
+
+        updateLoadProgress(40);
+        try {
+          renderer = new THREE.WebGLRenderer({
+            antialias: true,
+            alpha: false,
+            powerPreference: "high-performance", // 优先性能，适配高密度渲染
+            precision: "highp"
+          });
+        } catch (e) {
+          renderer = new THREE.WebGLRenderer({ antialias: false, precision: "highp" });
+        }
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5)); // 限制像素比，提升性能
+        document.getElementById('container').appendChild(renderer.domElement);
+
+        updateLoadProgress(50);
+        // 兼容OrbitControls的不同挂载方式
+        const OrbitControls = window.OrbitControls || THREE.OrbitControls;
+        controls = OrbitControls ? new OrbitControls(camera, renderer.domElement) : { update: () => {} };
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.minDistance = 50; // 相机最小距离后移，避免太近看不到整体
+        controls.maxDistance = 100;
+        controls.enableRotate = true;
+        controls.enableZoom = true;
+        controls.enablePan = true;
+
+        updateLoadProgress(60);
+        // 增强环境光，文字更清晰
+        const ambientLight = new THREE.AmbientLight(0xffffff, 2.0);
+        scene.add(ambientLight);
+
+        updateLoadProgress(70);
+        // 创建更密集的星空背景
+        function createStars() {
+          try {
+            const starsGeometry = new THREE.BufferGeometry();
+            const starsCount = 3000; // 星星数量翻倍（从1500→3000）
+            const positions = new Float32Array(starsCount * 3);
+            
+            for (let i = 0; i < starsCount * 3; i += 3) {
+              positions[i] = (Math.random() - 0.5) * 1500;
+              positions[i + 1] = (Math.random() - 0.5) * 1500;
+              positions[i + 2] = (Math.random() - 0.5) * 1500;
+            }
+            
+            starsGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            const starsMaterial = new THREE.PointsMaterial({
+              color: 0xffffff,
+              size: 0.9, // 星星稍大
+              sizeAttenuation: true,
+              opacity: 0.6
+            });
+            const stars = new THREE.Points(starsGeometry, starsMaterial);
+            scene.add(stars);
+          } catch (e) {
+            console.log('星空创建失败:', e);
+          }
+        }
+        createStars();
+
+        updateLoadProgress(80);
+        // 初始化高密度文字（80个）
+        for (let i = 0; i < config.maxActiveText; i++) {
+          createSingleText();
+          updateLoadProgress(80 + (i + 1) * 0.25); // 调整进度计算，避免溢出
+        }
+
+        updateLoadProgress(100);
+        // 双重定时器，更快补位
+        setInterval(spawnNewText, config.spawnInterval);
+        setInterval(() => {
+          if (textMeshes.length < config.minActiveText) {
+            spawnNewText();
+          }
+        }, 30); // 保底检测间隔缩短到30ms
+
+        // 窗口适配
+        window.addEventListener('resize', onWindowResize);
+      }
+
+      // 窗口大小适配
+      function onWindowResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      }
+
+      // 核心动画循环（优化性能，适配高密度）
+      function animate() {
+        requestAnimationFrame(animate);
+
+        // 更新全局颜色
+        updateGlobalRGB();
+
+        // 批量处理文字，减少循环开销
+        for (let i = textMeshes.length - 1; i >= 0; i--) {
+          const mesh = textMeshes[i];
+          // 同步颜色
+          if (mesh.userData.ctx && mesh.userData.text) {
+            const { ctx, canvas, text, fontSize } = mesh.userData;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.font = `bold ${fontSize}px Microsoft Yahei`;
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillStyle = `rgb(${currentRGB.r}, ${currentRGB.g}, ${currentRGB.b})`;
+            ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+            mesh.material.map.needsUpdate = true;
+          } else {
+            mesh.material.color.setRGB(currentRGB.r / 255, currentRGB.g / 255, currentRGB.b / 255);
+            mesh.material.needsUpdate = true;
+          }
+
+          // 文字上升
+          mesh.position.y += mesh.userData.speed;
+
+          // 检测删除
+          if (mesh.position.y > config.deleteYThreshold) {
+            deleteText(mesh);
+          }
+        }
+
+        controls.update();
+        renderer.render(scene, camera);
+      }
+
+      // 初始化入口
+      function init() {
+        const timeoutTimer = setTimeout(() => {
+          if (loadProgress < 100) {
+            loadingTextEl.textContent = "加载超时，重试中...";
+            updateLoadProgress(0);
+            setTimeout(() => { initScene(); }, 1000);
+          }
+        }, loadTimeout);
+
+        if (!checkWebGL()) {
+          clearTimeout(timeoutTimer);
+          loadingEl.style.display = 'none';
+          webglErrorEl.style.display = 'flex';
+          return;
+        }
+
+        try {
+          initScene();
+          animate();
+          clearTimeout(timeoutTimer);
+        } catch (e) {
+          clearTimeout(timeoutTimer);
+          console.error('初始化失败:', e);
+          loadingEl.style.display = 'none';
+          webglErrorEl.innerHTML = `<h3>场景加载失败</h3><p>错误信息：${e.message}</p>`;
+          webglErrorEl.style.display = 'flex';
+        }
+      }
+
+      // 执行初始化
+      init();
     }
 
-    // 窗口大小适配
-    function onWindowResize() {
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
-    }
-
-    // 核心动画循环（优化性能，适配高密度）
-    function animate() {
-      requestAnimationFrame(animate);
-
-      // 更新全局颜色
-      updateGlobalRGB();
-
-      // 批量处理文字，减少循环开销
-      for (let i = textMeshes.length - 1; i >= 0; i--) {
-        const mesh = textMeshes[i];
-        // 同步颜色
-        if (mesh.userData.ctx && mesh.userData.text) {
-          const { ctx, canvas, text, fontSize } = mesh.userData;
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
-          ctx.font = `bold ${fontSize}px Microsoft Yahei`;
-          ctx.textAlign = "center";
-          ctx.textBaseline = "middle";
-          ctx.fillStyle = `rgb(${currentRGB.r}, ${currentRGB.g}, ${currentRGB.b})`;
-          ctx.fillText(text, canvas.width / 2, canvas.height / 2);
-          mesh.material.map.needsUpdate = true;
-        } else {
-          mesh.material.color.setRGB(currentRGB.r / 255, currentRGB.g / 255, currentRGB.b / 255);
-          mesh.material.needsUpdate = true;
-        }
-
-        // 文字上升
-        mesh.position.y += mesh.userData.speed;
-
-        // 检测删除
-        if (mesh.position.y > config.deleteYThreshold) {
-          deleteText(mesh);
-        }
-      }
-
-      controls.update();
-      renderer.render(scene, camera);
-    }
-
-    // 初始化入口
-    function init() {
-      const timeoutTimer = setTimeout(() => {
-        if (loadProgress < 100) {
-          loadingTextEl.textContent = "加载超时，重试中...";
-          updateLoadProgress(0);
-          setTimeout(() => { initScene(); }, 1000);
-        }
-      }, loadTimeout);
-
-      if (!checkWebGL()) {
-        clearTimeout(timeoutTimer);
-        loadingEl.style.display = 'none';
-        webglErrorEl.style.display = 'flex';
-        return;
-      }
-
+    // 页面加载完成后，等待Three.js加载并执行核心逻辑
+    window.addEventListener('DOMContentLoaded', async () => {
+      const loadingEl = document.getElementById('loading');
+      const webglErrorEl = document.getElementById('webgl-error');
+      const loadingTextEl = loadingEl.querySelector('.loading-text');
+      
       try {
-        initScene();
-        animate();
-        clearTimeout(timeoutTimer);
-      } catch (e) {
-        clearTimeout(timeoutTimer);
-        console.error('初始化失败:', e);
+        // 等待Three.js加载完成
+        await waitForThreeLoaded();
+        // 执行3D初始化
+        init3D();
+      } catch (error) {
+        console.error('Three.js加载失败:', error);
         loadingEl.style.display = 'none';
-        webglErrorEl.innerHTML = `<h3>场景加载失败</h3><p>错误信息：${e.message}</p>`;
+        webglErrorEl.innerHTML = `<h3>3D库加载失败</h3><p>请检查网络或刷新页面重试</p><p>错误：${error.message}</p>`;
         webglErrorEl.style.display = 'flex';
       }
-    }
-
-    window.addEventListener('DOMContentLoaded', init);
+    });
   </script>
 </body>
 </html>
