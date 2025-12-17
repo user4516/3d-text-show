@@ -4,39 +4,47 @@
   <meta charset="utf-8">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
   <meta http-equiv="Pragma" content="no-cache">
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,minimum-scale=1,viewport-fit=cover">
-  <meta name="renderer" content="webkit">
-  <meta name="force-rendering" content="webkit">
-  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <!-- 视口配置：禁止缩放，基础尺寸适配 -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no">
   <title>祝你前程似锦~</title>
   <script src="https://cdn.jsdelivr.net/npm/three@0.140.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.140.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://res2.wx.qq.com/open/js/jweixin-1.6.0.js"></script>
   <style>
+    /* 全局样式：页面背景，居中容器 */
     * { 
       margin: 0; 
       padding: 0; 
       box-sizing: border-box; 
-      -webkit-tap-highlight-color: transparent;
+      overflow: hidden !important;
     }
-    body { 
-      overflow: hidden; 
-      background: #000; 
-      touch-action: none; /* 禁用默认触控行为，减少事件开销 */
+    html, body {
+      width: 100vw !important;
+      height: 100vh !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      overflow: hidden !important;
+      touch-action: none !important;
+      zoom: 1 !important;
+      background: #111; /* 页面背景色，可自定义 */
       font-family: "Microsoft Yahei", PingFang SC, sans-serif;
-      -webkit-font-smoothing: antialiased;
-      -moz-osx-font-smoothing: grayscale;
+      /* 核心：让body作为容器，居中750×698的渲染窗口 */
+      display: flex;
+      justify-content: center;
+      align-items: center;
     }
+    /* 核心：750×698渲染容器，居中显示 */
     #container { 
-      width: 100vw; 
-      height: 100vh; 
-      position: fixed; /* 固定定位，减少重排 */
-      top: 0;
-      left: 0;
+      width: 750px !important; 
+      height: 698px !important;
+      position: relative !important;
+      z-index: 1;
+      border: 1px solid #333; /* 可选：显示容器边框，便于查看 */
+      box-shadow: 0 0 20px rgba(0,0,0,0.5); /* 可选：增加阴影，突出窗口 */
     }
-    /* 加载提示样式 */
+    /* 加载提示：居中在容器内 */
     #loading {
-      position: fixed;
+      position: absolute;
       top: 50%;
       left: 50%;
       transform: translate(-50%, -50%);
@@ -47,7 +55,6 @@
       flex-direction: column;
       align-items: center;
       gap: 15px;
-      pointer-events: none; /* 避免拦截触控事件 */
     }
     .loading-spinner {
       width: 40px;
@@ -65,7 +72,7 @@
       color: #ccc;
     }
     #webgl-error {
-      position: fixed;
+      position: absolute;
       top: 0;
       left: 0;
       width: 100%;
@@ -88,16 +95,17 @@
   </style>
 </head>
 <body>
-  <div id="loading">
-    <div class="loading-spinner"></div>
-    <div class="loading-text">正在加载3D场景...</div>
-    <div class="loading-progress">0%</div>
+  <div id="container">
+    <div id="loading">
+      <div class="loading-spinner"></div>
+      <div class="loading-text">正在加载3D场景...</div>
+      <div class="loading-progress">0%</div>
+    </div>
+    <div id="webgl-error">
+      <h3>当前设备/浏览器不支持WebGL</h3>
+      <p>请更换Chrome/Edge/Firefox浏览器，或使用微信内置浏览器打开</p>
+    </div>
   </div>
-  <div id="webgl-error">
-    <h3>当前设备/浏览器不支持WebGL</h3>
-    <p>请更换Chrome/Edge/Firefox浏览器，或微信内置浏览器打开</p>
-  </div>
-  <div id="container"></div>
 
   <!-- 1. 微信字体适配 -->
   <script>
@@ -121,14 +129,47 @@
     })();
   </script>
 
-  <!-- 核心3D逻辑（手机端帧率优化版） -->
+  <!-- 2. 防缩放/防滚动 -->
   <script>
-    // 性能优化：检测设备类型，移动端针对性优化
-    const isMobile = /Android|iPhone|iPad|iPod|BlackBerry|Windows Phone/i.test(navigator.userAgent);
-    let frameCount = 0;
-    let lastTime = performance.now();
+    window.onload = function() {
+      // 阻止双击缩放
+      let lastTouchEnd = 0;
+      document.addEventListener("touchend", (event) => {
+        const now = Date.now();
+        if (now - lastTouchEnd <= 300) event.preventDefault();
+        lastTouchEnd = now;
+      }, { passive: false });
 
-    // 等待Three.js加载完成
+      // 阻止多点触控
+      document.addEventListener("touchstart", (event) => {
+        if (event.touches.length > 1) event.preventDefault();
+      }, { passive: false });
+
+      // 阻止键盘缩放
+      document.addEventListener("keydown", (e) => {
+        if ((e.ctrlKey || e.metaKey) && (e.key === '+' || e.key === '-' || e.key === '=' || e.wheelDelta)) {
+          e.preventDefault();
+        }
+      });
+
+      // 阻止滚轮缩放
+      document.addEventListener("wheel", (e) => {
+        if (e.ctrlKey) e.preventDefault();
+      }, { passive: false });
+
+      // 锁定容器尺寸，防止篡改
+      const observer = new MutationObserver((mutations) => {
+        mutations.forEach(() => {
+          document.getElementById('container').style.width = '750px';
+          document.getElementById('container').style.height = '698px';
+        });
+      });
+      observer.observe(document.getElementById('container'), { attributes: true, attributeFilter: ['style'] });
+    };
+  </script>
+
+  <!-- 3. 核心3D逻辑（适配750×698居中容器） -->
+  <script>
     function waitForThreeLoaded() {
       return new Promise((resolve, reject) => {
         const checkInterval = setInterval(() => {
@@ -144,7 +185,6 @@
       });
     }
 
-    // 核心逻辑封装
     async function init3D() {
       let scene, camera, renderer, controls;
       const textMeshes = [];
@@ -152,39 +192,31 @@
       let currentRGB = { r: 255, g: 0, b: 0 };
       let colorPhase = 0;
 
-      // 移动端优化配置（平衡密度和性能）
       const config = {
-        centerRatio: isMobile ? 0.75 : 0.8,
-        centerXRange: { min: -25, max: 25 },
-        sideXRange: { min: -50, max: 50 },
-        zRange: { min: -50, max: 10 },
-        // 移动端适当减少文字数量（80→60），提升帧率
-        maxActiveText: isMobile ? 60 : 80,
-        minActiveText: isMobile ? 55 : 75,
-        spawnInterval: isMobile ? 80 : 50, // 移动端放慢生成频率
-        deleteYThreshold: 80,
-        // 移动端字体尺寸微调（略小，减少渲染开销）
+        centerRatio: 0.8,
+        centerXRange: { min: -20, max: 20 },
+        sideXRange: { min: -40, max: 40 },
+        zRange: { min: -45, max: 5 },
+        maxActiveText: 80,
+        minActiveText: 75,
+        spawnInterval: 50,
+        deleteYThreshold: 75,
         fontSize: {
-          small: { min: isMobile ? 45 : 50, max: isMobile ? 75 : 80, weight: 0.6 },
-          medium: { min: isMobile ? 75 : 80, max: isMobile ? 105 : 110, weight: 0.3 },
-          large: { min: isMobile ? 105 : 110, max: isMobile ? 135 : 140, weight: 0.1 }
+          small: { min: 50, max: 80, weight: 0.6 },
+          medium: { min: 80, max: 110, weight: 0.3 },
+          large: { min: 110, max: 140, weight: 0.1 }
         },
         geoSize: {
-          small: { min: isMobile ? 15 : 15, max: isMobile ? 28 : 30, weight: 0.6 },
-          medium: { min: isMobile ? 28 : 30, max: isMobile ? 38 : 40, weight: 0.3 },
-          large: { min: isMobile ? 38 : 40, max: isMobile ? 48 : 50, weight: 0.1 }
+          small: { min: 15, max: 30, weight: 0.6 },
+          medium: { min: 30, max: 40, weight: 0.3 },
+          large: { min: 40, max: 50, weight: 0.1 }
         },
-        // 移动端速度略慢，保持视觉效果
-        centerSpeedRange: { min: 0.25, max: 0.7 },
-        sideSpeedRange: { min: 0.20, max: 0.25 },
-        colorSpeed: 0.004,
-        // 性能优化：颜色更新帧率（每2帧更新一次）
-        colorUpdateInterval: 2,
-        // 移动端禁用抗锯齿（提升帧率，视觉损失小）
-        antialias: !isMobile
+        centerSpeedRange: { min: 0.3, max: 0.6 },
+        sideSpeedRange: { min: 0.2, max: 0.25 },
+        colorSpeed: 0.004
       };
 
-      // 加载相关变量
+      const containerEl = document.getElementById('container');
       const loadingEl = document.getElementById('loading');
       const loadingTextEl = loadingEl.querySelector('.loading-text');
       const loadingProgressEl = loadingEl.querySelector('.loading-progress');
@@ -192,7 +224,6 @@
       let loadProgress = 0;
       const loadTimeout = 10000;
 
-      // 颜色渐变表
       const colorGradients = [
         { r: 255, g: 0, b: 0 },
         { r: 255, g: 127, b: 0 },
@@ -204,7 +235,6 @@
         { r: 255, g: 0, b: 0 }
       ];
 
-      // 检测WebGL支持
       function checkWebGL() {
         try {
           const canvas = document.createElement('canvas');
@@ -214,7 +244,6 @@
         }
       }
 
-      // 更新加载进度
       function updateLoadProgress(progress) {
         loadProgress = Math.min(progress, 100);
         loadingProgressEl.textContent = `${loadProgress}%`;
@@ -224,7 +253,6 @@
         }
       }
 
-      // 生成偏向中心的X坐标
       function getCenterBiasedX(isCenter) {
         if (isCenter) {
           return Math.random() * (config.centerXRange.max - config.centerXRange.min) + config.centerXRange.min;
@@ -236,100 +264,65 @@
         }
       }
 
-      // 按权重选择尺寸类型
       function getSizeType() {
         const random = Math.random();
-        if (random < config.fontSize.small.weight) return 'small';
-        if (random < config.fontSize.small.weight + config.fontSize.medium.weight) return 'medium';
-        return 'large';
+        return random < 0.6 ? 'small' : random < 0.9 ? 'medium' : 'large';
       }
 
-      // 生成随机字号
       function getRandomFontSize() {
-        const sizeType = getSizeType();
-        const range = config.fontSize[sizeType];
+        const type = getSizeType();
+        const range = config.fontSize[type];
         return Math.floor(Math.random() * (range.max - range.min + 1) + range.min);
       }
 
-      // 生成随机几何尺寸
       function getRandomGeoSize() {
-        const sizeType = getSizeType();
-        const range = config.geoSize[sizeType];
+        const type = getSizeType();
+        const range = config.geoSize[type];
         return Math.round(Math.random() * (range.max - range.min) * 10) / 10 + range.min;
       }
 
-      // 生成随机速度
       function getRandomSpeed(isCenter, geoSize) {
         const speedFactor = 1 - (geoSize - config.geoSize.small.min) / (config.geoSize.large.max - config.geoSize.small.min);
-        const [baseMin, baseMax] = isCenter 
-          ? [config.centerSpeedRange.min, config.centerSpeedRange.max] 
-          : [config.sideSpeedRange.min, config.sideSpeedRange.max];
-        return baseMin + (baseMax - baseMin) * speedFactor * Math.random();
+        const [min, max] = isCenter ? [config.centerSpeedRange.min, config.centerSpeedRange.max] : [config.sideSpeedRange.min, config.sideSpeedRange.max];
+        return min + (max - min) * speedFactor * Math.random();
       }
 
-      // 通用随机函数
-      const getRandomZ = () => Math.random() * (config.zRange.max - config.zRange.min) + config.zRange.min;
-      const getRandomY = () => Math.random() * -200;
-      const getRandomText = () => textList[Math.floor(Math.random() * textList.length)];
-      const isCenterText = () => Math.random() < config.centerRatio;
+      function getRandomZ() { return Math.random() * (config.zRange.max - config.zRange.min) + config.zRange.min; }
+      function getRandomY() { return Math.random() * -180; }
+      function getRandomText() { return textList[Math.floor(Math.random() * textList.length)]; }
+      function isCenterText() { return Math.random() < config.centerRatio; }
 
-      // 性能优化：缓存颜色字符串，减少重复计算
-      let colorString = `rgb(${currentRGB.r}, ${currentRGB.g}, ${currentRGB.b})`;
       function updateGlobalRGB() {
-        colorPhase += config.colorSpeed;
-        if (colorPhase > 1) colorPhase = 0;
-        
+        colorPhase = (colorPhase + config.colorSpeed) % 1;
         const gradientIndex = Math.floor(colorPhase * (colorGradients.length - 1));
         const nextIndex = (gradientIndex + 1) % (colorGradients.length - 1);
-        const blend = (colorPhase * (colorGradients.length - 1)) - gradientIndex;
-        
+        const blend = colorPhase * (colorGradients.length - 1) - gradientIndex;
         const from = colorGradients[gradientIndex];
         const to = colorGradients[nextIndex];
         currentRGB.r = Math.floor(from.r + blend * (to.r - from.r));
         currentRGB.g = Math.floor(from.g + blend * (to.g - from.g));
         currentRGB.b = Math.floor(from.b + blend * (to.b - from.b));
-        colorString = `rgb(${currentRGB.r}, ${currentRGB.g}, ${currentRGB.b})`;
       }
 
-      // 性能优化：复用Canvas纹理，减少创建开销
-      const textureCache = new Map();
       function createTextTexture(text, fontSize) {
-        const cacheKey = `${text}-${fontSize}`;
-        // 缓存命中则直接返回
-        if (textureCache.has(cacheKey)) {
-          const cached = textureCache.get(cacheKey);
-          // 更新颜色（仅重绘文字，不重建Canvas）
-          const ctx = cached.ctx;
-          ctx.clearRect(0, 0, cached.canvas.width, cached.canvas.height);
-          ctx.fillStyle = colorString;
-          ctx.fillText(text, cached.canvas.width / 2, cached.canvas.height / 2);
-          cached.texture.needsUpdate = true;
-          return cached;
-        }
-
-        // 未命中则创建新纹理
         const canvasWidth = fontSize * text.length * 2.2;
         const canvasHeight = fontSize * 2.8;
         const canvas = document.createElement('canvas');
         canvas.width = canvasWidth;
         canvas.height = canvasHeight;
         const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.font = `bold ${fontSize}px Microsoft Yahei`;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        ctx.fillStyle = colorString;
-        ctx.fillText(text, canvasWidth / 2, canvasHeight / 2);
-        
+        ctx.fillStyle = `rgb(${currentRGB.r}, ${currentRGB.g}, ${currentRGB.b})`;
+        ctx.fillText(text, canvas.width / 2, canvas.height / 2);
         const texture = new THREE.CanvasTexture(canvas);
         texture.minFilter = THREE.LinearFilter;
         texture.magFilter = THREE.LinearFilter;
-        
-        const result = { texture, canvas, ctx };
-        textureCache.set(cacheKey, result);
-        return result;
+        return { texture, canvas, ctx };
       }
 
-      // 创建单个文字
       function createSingleText() {
         const isCenter = isCenterText();
         const text = getRandomText();
@@ -345,317 +338,176 @@
             opacity: 1,
             side: THREE.DoubleSide,
             alphaTest: 0.01,
-            blending: THREE.NormalBlending,
-            precision: "highp"
+            blending: THREE.NormalBlending
           });
-
-          // 性能优化：复用几何体（相同尺寸的几何体只创建一次）
-          const geoKey = `${geoWidth}-${geoHeight}`;
-          let geometry = THREE.Cache.get(geoKey);
-          if (!geometry) {
-            geometry = new THREE.PlaneGeometry(geoWidth, geoHeight);
-            THREE.Cache.add(geoKey, geometry);
-          }
-
+          const geometry = new THREE.PlaneGeometry(geoWidth, geoHeight);
           const mesh = new THREE.Mesh(geometry, material);
           mesh.position.set(getCenterBiasedX(isCenter), getRandomY(), getRandomZ());
-          mesh.userData = {
-            isCenter,
-            speed: getRandomSpeed(isCenter, geoWidth),
-            text,
-            fontSize,
-            geoWidth,
-            geoHeight,
-            textureKey: `${text}-${fontSize}`
-          };
-
+          mesh.userData = { isCenter, speed: getRandomSpeed(isCenter, geoWidth), text, canvas: textureData.canvas, ctx: textureData.ctx, fontSize, geoWidth, geoHeight };
           scene.add(mesh);
           textMeshes.push(mesh);
           return mesh;
         } catch (e) {
-          // 兜底方块
-          const geoWidth = getRandomGeoSize();
-          const geoHeight = geoWidth / 4;
-          const geoKey = `${geoWidth}-${geoHeight}`;
-          let geometry = THREE.Cache.get(geoKey);
-          if (!geometry) {
-            geometry = new THREE.PlaneGeometry(geoWidth, geoHeight);
-            THREE.Cache.add(geoKey, geometry);
-          }
-
           const material = new THREE.MeshBasicMaterial({
             color: new THREE.Color(currentRGB.r / 255, currentRGB.g / 255, currentRGB.b / 255),
             transparent: true,
-            opacity: 1,
-            blending: THREE.NormalBlending,
-            precision: "highp"
+            opacity: 1
           });
-
+          const geometry = new THREE.PlaneGeometry(geoWidth, geoHeight);
           const mesh = new THREE.Mesh(geometry, material);
           mesh.position.set(getCenterBiasedX(isCenter), getRandomY(), getRandomZ());
-          mesh.userData = {
-            isCenter,
-            speed: getRandomSpeed(isCenter, geoWidth),
-            text,
-            fontSize,
-            geoWidth,
-            geoHeight,
-            isFallback: true
-          };
-
+          mesh.userData = { isCenter, speed: getRandomSpeed(isCenter, geoWidth), text, fontSize, geoWidth, geoHeight };
           scene.add(mesh);
           textMeshes.push(mesh);
           return mesh;
         }
       }
 
-      // 性能优化：批量生成文字，减少DOM操作
       function spawnNewText() {
         const needAdd = config.maxActiveText - textMeshes.length;
         if (needAdd > 0) {
-          const addCount = Math.min(needAdd, isMobile ? 5 : 8);
-          // 批量创建，减少场景渲染次数
-          scene.autoUpdate = false;
-          for (let i = 0; i < addCount; i++) {
-            createSingleText();
-          }
-          scene.autoUpdate = true;
+          for (let i = 0; i < Math.min(needAdd, 8); i++) createSingleText();
         }
       }
 
-      // 删除文字（释放资源）
       function deleteText(mesh) {
         const index = textMeshes.indexOf(mesh);
         if (index > -1) {
           textMeshes.splice(index, 1);
           scene.remove(mesh);
-          // 只释放材质，几何体复用
-          if (mesh.material.map) mesh.material.map.dispose();
-          mesh.material.dispose();
+          if (mesh.geometry) mesh.geometry.dispose();
+          if (mesh.material) {
+            if (mesh.material.map) mesh.material.map.dispose();
+            mesh.material.dispose();
+          }
         }
       }
 
-      // 初始化场景
       function initScene() {
         updateLoadProgress(20);
         scene = new THREE.Scene();
         scene.background = new THREE.Color(0x000000);
-        // 性能优化：禁用场景自动更新，手动控制
-        scene.autoUpdate = true;
 
-        // 相机优化：移动端视角略大，减少裁剪
         updateLoadProgress(30);
-        camera = new THREE.PerspectiveCamera(
-          isMobile ? 65 : 60,
-          window.innerWidth / window.innerHeight,
-          0.1,
-          1000
-        );
-        camera.position.set(0, 0, isMobile ? 65 : 60);
+        // 严格匹配750×698比例的相机
+        camera = new THREE.PerspectiveCamera(58, 750 / 698, 0.1, 1000);
+        camera.position.set(0, 0, 55);
 
-        // 渲染器优化（核心）
         updateLoadProgress(40);
         renderer = new THREE.WebGLRenderer({
-          antialias: config.antialias,
+          antialias: true,
           alpha: false,
-          powerPreference: "high-performance", // 优先性能
-          precision: "highp",
-          preserveDrawingBuffer: false // 禁用缓冲区保存，减少内存
+          powerPreference: "high-performance"
         });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        // 移动端限制像素比为1，大幅提升帧率
-        renderer.setPixelRatio(isMobile ? 1 : Math.min(window.devicePixelRatio, 1.5));
-        renderer.autoClear = true;
-        renderer.clear();
-        document.getElementById('container').appendChild(renderer.domElement);
+        // 强制渲染尺寸为750×698
+        renderer.setSize(750, 698);
+        renderer.setPixelRatio(window.devicePixelRatio || 1); // 适配高清屏，渲染尺寸仍为750×698
+        renderer.domElement.style.width = '100%';
+        renderer.domElement.style.height = '100%';
+        containerEl.appendChild(renderer.domElement);
 
-        // 控制器优化：移动端降低阻尼，减少计算
         updateLoadProgress(50);
         const OrbitControls = window.OrbitControls || THREE.OrbitControls;
         controls = OrbitControls ? new OrbitControls(camera, renderer.domElement) : { update: () => {} };
-        controls.enableDamping = isMobile ? false : true; // 移动端禁用阻尼
+        controls.enableDamping = true;
         controls.dampingFactor = 0.05;
-        controls.minDistance = isMobile ? 55 : 50;
-        controls.maxDistance = isMobile ? 105 : 100;
-        controls.enableRotate = true;
-        controls.enableZoom = true;
-        controls.enablePan = false; // 移动端禁用平移，减少操作
+        controls.minDistance = 45;
+        controls.maxDistance = 95;
 
-        // 灯光优化：单个环境光足够，减少计算
         updateLoadProgress(60);
-        const ambientLight = new THREE.AmbientLight(0xffffff, isMobile ? 1.8 : 2.0);
-        scene.add(ambientLight);
+        scene.add(new THREE.AmbientLight(0xffffff, 2.0));
 
-        // 星空优化：移动端减少星星数量
         updateLoadProgress(70);
-        function createStars() {
-          try {
-            const starsCount = isMobile ? 1500 : 3000;
-            const starsGeometry = new THREE.BufferGeometry();
-            const positions = new Float32Array(starsCount * 3);
-            
-            for (let i = 0; i < starsCount * 3; i += 3) {
-              positions[i] = (Math.random() - 0.5) * (isMobile ? 1200 : 1500);
-              positions[i + 1] = (Math.random() - 0.5) * (isMobile ? 1200 : 1500);
-              positions[i + 2] = (Math.random() - 0.5) * (isMobile ? 1200 : 1500);
-            }
-            
-            starsGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-            const starsMaterial = new THREE.PointsMaterial({
-              color: 0xffffff,
-              size: isMobile ? 0.7 : 0.9,
-              sizeAttenuation: true,
-              opacity: 0.6
-            });
-            const stars = new THREE.Points(starsGeometry, starsMaterial);
-            scene.add(stars);
-          } catch (e) {
-            console.log('星空创建失败:', e);
-          }
+        // 星空背景
+        const starsGeometry = new THREE.BufferGeometry();
+        const starsCount = 3000;
+        const positions = new Float32Array(starsCount * 3);
+        for (let i = 0; i < starsCount * 3; i += 3) {
+          positions[i] = (Math.random() - 0.5) * 1400;
+          positions[i + 1] = (Math.random() - 0.5) * 1400;
+          positions[i + 2] = (Math.random() - 0.5) * 1400;
         }
-        createStars();
+        starsGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        const starsMaterial = new THREE.PointsMaterial({
+          color: 0xffffff,
+          size: 0.9,
+          sizeAttenuation: true,
+          opacity: 0.6
+        });
+        scene.add(new THREE.Points(starsGeometry, starsMaterial));
 
-        // 初始化文字（批量创建）
         updateLoadProgress(80);
-        scene.autoUpdate = false;
         for (let i = 0; i < config.maxActiveText; i++) {
           createSingleText();
-          updateLoadProgress(80 + (i + 1) * (100 - 80) / config.maxActiveText);
+          updateLoadProgress(80 + (i + 1) * 0.25);
         }
-        scene.autoUpdate = true;
 
         updateLoadProgress(100);
-        // 定时器优化：使用requestAnimationFrame替代setInterval，避免丢帧
-        let spawnTimer = null;
-        function spawnLoop() {
-          spawnNewText();
-          spawnTimer = setTimeout(() => {
-            requestAnimationFrame(spawnLoop);
-          }, config.spawnInterval);
-        }
-        spawnLoop();
-
-        // 保底检测也用requestAnimationFrame
-        let checkTimer = null;
-        function checkLoop() {
-          if (textMeshes.length < config.minActiveText) {
-            spawnNewText();
-          }
-          checkTimer = setTimeout(() => {
-            requestAnimationFrame(checkLoop);
-          }, isMobile ? 50 : 30);
-        }
-        checkLoop();
-
-        // 窗口适配优化：防抖处理
-        let resizeTimer = null;
-        window.addEventListener('resize', () => {
-          clearTimeout(resizeTimer);
-          resizeTimer = setTimeout(() => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-          }, 100);
-        });
+        setInterval(spawnNewText, config.spawnInterval);
+        setInterval(() => { if (textMeshes.length < config.minActiveText) spawnNewText(); }, 30);
       }
 
-      // 性能优化：动画循环（核心）
-      function animate(currentTime) {
+      function animate() {
         requestAnimationFrame(animate);
+        updateGlobalRGB();
 
-        // 帧率监控（可选，调试用）
-        frameCount++;
-        if (currentTime - lastTime >= 1000) {
-          // console.log(`帧率: ${frameCount} FPS`);
-          frameCount = 0;
-          lastTime = currentTime;
-        }
-
-        // 颜色更新优化：每N帧更新一次，减少计算
-        if (frameCount % config.colorUpdateInterval === 0) {
-          updateGlobalRGB();
-        }
-
-        // 文字处理优化：反向遍历，减少数组重排
+        // 批量处理文字
         for (let i = textMeshes.length - 1; i >= 0; i--) {
           const mesh = textMeshes[i];
-          
-          // 只更新位置（最轻量化操作）
+          if (mesh.userData.ctx && mesh.userData.text) {
+            const { ctx, canvas, text, fontSize } = mesh.userData;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.font = `bold ${fontSize}px Microsoft Yahei`;
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillStyle = `rgb(${currentRGB.r}, ${currentRGB.g}, ${currentRGB.b})`;
+            ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+            mesh.material.map.needsUpdate = true;
+          } else {
+            mesh.material.color.setRGB(currentRGB.r / 255, currentRGB.g / 255, currentRGB.b / 255);
+          }
+
           mesh.position.y += mesh.userData.speed;
-
-          // 颜色更新优化：仅在颜色帧更新时同步
-          if (frameCount % config.colorUpdateInterval === 0) {
-            if (!mesh.userData.isFallback) {
-              // 复用缓存的纹理更新，不重建
-              const textureData = textureCache.get(mesh.userData.textureKey);
-              if (textureData) {
-                const ctx = textureData.ctx;
-                ctx.clearRect(0, 0, textureData.canvas.width, textureData.canvas.height);
-                ctx.fillStyle = colorString;
-                ctx.fillText(mesh.userData.text, textureData.canvas.width / 2, textureData.canvas.height / 2);
-                textureData.texture.needsUpdate = true;
-              }
-            } else {
-              mesh.material.color.setRGB(currentRGB.r / 255, currentRGB.g / 255, currentRGB.b / 255);
-            }
-          }
-
-          // 超出阈值删除
-          if (mesh.position.y > config.deleteYThreshold) {
-            deleteText(mesh);
-          }
+          if (mesh.position.y > config.deleteYThreshold) deleteText(mesh);
         }
 
-        // 控制器更新优化：移动端禁用阻尼后，只在有交互时更新
-        if (!isMobile || controls.hasInteraction) {
-          controls.update();
-        }
-
-        // 渲染优化：只渲染必要的内容
+        controls.update();
         renderer.render(scene, camera);
       }
 
-      // 初始化入口
-      function init() {
-        const timeoutTimer = setTimeout(() => {
-          if (loadProgress < 100) {
-            loadingTextEl.textContent = "加载超时，重试中...";
-            updateLoadProgress(0);
-            setTimeout(() => { initScene(); }, 1000);
-          }
-        }, loadTimeout);
-
-        if (!checkWebGL()) {
-          clearTimeout(timeoutTimer);
-          loadingEl.style.display = 'none';
-          webglErrorEl.style.display = 'flex';
-          return;
+      // 初始化执行
+      const timeoutTimer = setTimeout(() => {
+        if (loadProgress < 100) {
+          loadingTextEl.textContent = "加载超时，重试中...";
+          updateLoadProgress(0);
+          setTimeout(initScene, 1000);
         }
+      }, loadTimeout);
 
-        try {
-          // 启用Three.js缓存，复用几何体
-          THREE.Cache.enabled = true;
-          initScene();
-          animate(performance.now());
-          clearTimeout(timeoutTimer);
-        } catch (e) {
-          clearTimeout(timeoutTimer);
-          console.error('初始化失败:', e);
-          loadingEl.style.display = 'none';
-          webglErrorEl.innerHTML = `<h3>场景加载失败</h3><p>错误信息：${e.message}</p>`;
-          webglErrorEl.style.display = 'flex';
-        }
+      if (!checkWebGL()) {
+        clearTimeout(timeoutTimer);
+        loadingEl.style.display = 'none';
+        webglErrorEl.style.display = 'flex';
+        return;
       }
 
-      init();
+      try {
+        initScene();
+        animate();
+        clearTimeout(timeoutTimer);
+      } catch (e) {
+        clearTimeout(timeoutTimer);
+        console.error('初始化失败:', e);
+        loadingEl.style.display = 'none';
+        webglErrorEl.innerHTML = `<h3>场景加载失败</h3><p>错误信息：${e.message}</p>`;
+        webglErrorEl.style.display = 'flex';
+      }
     }
 
-    // 页面加载完成后执行
+    // 页面加载完成后初始化3D
     window.addEventListener('DOMContentLoaded', async () => {
       const loadingEl = document.getElementById('loading');
       const webglErrorEl = document.getElementById('webgl-error');
-      const loadingTextEl = loadingEl.querySelector('.loading-text');
-      
       try {
         await waitForThreeLoaded();
         init3D();
@@ -664,15 +516,6 @@
         loadingEl.style.display = 'none';
         webglErrorEl.innerHTML = `<h3>3D库加载失败</h3><p>请检查网络或刷新页面重试</p><p>错误：${error.message}</p>`;
         webglErrorEl.style.display = 'flex';
-      }
-    });
-
-    // 移动端内存优化：页面隐藏时暂停动画，恢复时重启
-    document.addEventListener('visibilitychange', () => {
-      if (document.hidden) {
-        cancelAnimationFrame(animate);
-      } else {
-        requestAnimationFrame(animate);
       }
     });
   </script>
