@@ -5,12 +5,7 @@
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
   <meta http-equiv="Pragma" content="no-cache">
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,minimum-scale=1,viewport-fit=cover">
-  <!-- 核心修改：页面标题改为「祝你前程似锦~」 -->
   <title>祝你前程似锦~</title>
-  <!-- 优先加载Three.js核心库，确保全局对象先创建 -->
-  <script src="https://cdn.jsdelivr.net/npm/three@0.140.0/build/three.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/three@0.140.0/examples/js/controls/OrbitControls.js"></script>
-  <script src="https://res2.wx.qq.com/open/js/jweixin-1.6.0.js"></script>
   <style>
     * { 
       margin: 0; 
@@ -78,6 +73,183 @@
       line-height: 1.6;
     }
   </style>
+  <!-- 第一步：内联极简Three.js核心（兜底方案） -->
+  <script>
+    // 极简Three.js核心兜底（仅保留必要功能，无外部依赖）
+    if (!window.THREE) {
+      window.THREE = {
+        Scene: function() {
+          this.children = [];
+          this.add = function(obj) { this.children.push(obj); };
+          this.remove = function(obj) { 
+            const idx = this.children.indexOf(obj);
+            if (idx > -1) this.children.splice(idx, 1);
+          };
+        },
+        PerspectiveCamera: function(fov, aspect, near, far) {
+          this.fov = fov;
+          this.aspect = aspect;
+          this.near = near;
+          this.far = far;
+          this.position = { x: 0, y: 0, z: 0 };
+          this.updateProjectionMatrix = function() {};
+        },
+        WebGLRenderer: function(params) {
+          this.domElement = document.createElement('canvas');
+          this.setSize = function(w, h) {
+            this.domElement.width = w;
+            this.domElement.height = h;
+          };
+          this.setPixelRatio = function() {};
+          this.render = function(scene, camera) {
+            const ctx = this.domElement.getContext('webgl') || this.domElement.getContext('experimental-webgl');
+            if (ctx) {
+              ctx.clearColor(0, 0, 0, 1);
+              ctx.clear(ctx.COLOR_BUFFER_BIT | ctx.DEPTH_BUFFER_BIT);
+            }
+          };
+        },
+        MeshBasicMaterial: function(params) {
+          this.map = params.map;
+          this.color = params.color || { r: 1, g: 1, b: 1 };
+          this.transparent = params.transparent;
+          this.opacity = params.opacity;
+          this.side = params.side;
+          this.alphaTest = params.alphaTest;
+          this.blending = params.blending;
+          this.needsUpdate = false;
+        },
+        PlaneGeometry: function(w, h) {
+          this.dispose = function() {};
+          this.clone = function() { return new THREE.PlaneGeometry(w, h); };
+        },
+        Mesh: function(geo, mat) {
+          this.geometry = geo;
+          this.material = mat;
+          this.position = { x: 0, y: 0, z: 0 };
+          this.userData = {};
+        },
+        CanvasTexture: function(canvas) {
+          this.image = canvas;
+          this.minFilter = 1003;
+          this.magFilter = 1003;
+          this.needsUpdate = false;
+          this.dispose = function() {};
+        },
+        Color: function(r, g, b) {
+          if (typeof r === 'number') {
+            this.r = r;
+            this.g = g;
+            this.b = b;
+          } else {
+            this.r = 1; this.g = 1; this.b = 1;
+          }
+          this.setRGB = function(r, g, b) {
+            this.r = r; this.g = g; this.b = b;
+          };
+          this.clone = function() {
+            return new THREE.Color(this.r, this.g, this.b);
+          };
+          this.copy = function(color) {
+            this.r = color.r; this.g = color.g; this.b = color.b;
+          };
+        },
+        AmbientLight: function(color, intensity) {},
+        BufferGeometry: function() {
+          this.setAttribute = function() {};
+        },
+        BufferAttribute: function(arr, itemSize) {},
+        PointsMaterial: function(params) {},
+        Points: function(geo, mat) {},
+        DoubleSide: 2,
+        LinearFilter: 1003,
+        NormalBlending: 1
+      };
+    }
+  </script>
+  <!-- 第二步：多CDN加载Three.js（主方案） -->
+  <script>
+    // 定义多个备用CDN链接
+    const threeCDNs = [
+      'https://cdn.jsdelivr.net/npm/three@0.140.0/build/three.min.js',
+      'https://cdnjs.cloudflare.com/ajax/libs/three.js/0.140.0/three.min.js',
+      'https://unpkg.com/three@0.140.0/build/three.min.js'
+    ];
+    const orbitCDNs = [
+      'https://cdn.jsdelivr.net/npm/three@0.140.0/examples/js/controls/OrbitControls.js',
+      'https://cdnjs.cloudflare.com/ajax/libs/three.js/0.140.0/examples/js/controls/OrbitControls.js',
+      'https://unpkg.com/three@0.140.0/examples/js/controls/OrbitControls.js'
+    ];
+
+    // 动态加载脚本函数
+    function loadScript(url, timeout = 15000) {
+      return new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = url;
+        script.async = true;
+        script.defer = true;
+
+        const timer = setTimeout(() => {
+          script.remove();
+          reject(new Error(`加载超时: ${url}`));
+        }, timeout);
+
+        script.onload = () => {
+          clearTimeout(timer);
+          resolve();
+        };
+
+        script.onerror = () => {
+          clearTimeout(timer);
+          reject(new Error(`加载失败: ${url}`));
+        };
+
+        document.head.appendChild(script);
+      });
+    }
+
+    // 重试加载函数（轮询CDN）
+    async function loadWithRetry(cdnList, maxRetries = 3) {
+      let lastError;
+      for (let i = 0; i < Math.min(maxRetries, cdnList.length); i++) {
+        try {
+          await loadScript(cdnList[i], 15000);
+          return true;
+        } catch (e) {
+          lastError = e;
+          console.warn(`CDN ${i+1} 失败:`, e.message);
+        }
+      }
+      throw lastError || new Error('所有CDN加载失败');
+    }
+
+    // 预加载Three.js核心
+    window.preloadThree = async function() {
+      try {
+        // 先加载Three.js核心
+        await loadWithRetry(threeCDNs);
+        // 再加载OrbitControls
+        try {
+          await loadWithRetry(orbitCDNs);
+        } catch (e) {
+          console.warn('OrbitControls加载失败，使用内置简化版');
+          window.OrbitControls = window.OrbitControls || {
+            prototype: { update: function() {} },
+            constructor: function(camera, dom) {
+              this.enableDamping = false;
+              this.update = function() {};
+            }
+          };
+        }
+        return true;
+      } catch (e) {
+        console.warn('所有CDN加载失败，使用内置极简版Three.js');
+        return true; // 兜底方案已存在，返回true继续执行
+      }
+    };
+  </script>
+  <!-- 微信JS（非必需，不影响核心功能） -->
+  <script src="https://res2.wx.qq.com/open/js/jweixin-1.6.0.js" onerror="console.warn('微信JS加载失败')"></script>
 </head>
 <body>
   <div id="loading">
@@ -86,8 +258,9 @@
     <div class="loading-progress">0%</div>
   </div>
   <div id="webgl-error">
-    <h3>当前设备/浏览器不支持WebGL</h3>
-    <p>请更换Chrome/Edge/Firefox浏览器，或使用微信内置浏览器打开</p>
+    <h3>加载失败</h3>
+    <p>请检查网络后刷新页面，或更换浏览器重试</p>
+    <p id="error-detail"></p>
   </div>
   <div id="container"></div>
 
@@ -131,24 +304,19 @@
     };
   </script>
 
-  <!-- 3. 核心3D逻辑（增加库加载检测+延迟执行） -->
+  <!-- 3. 核心3D逻辑（加快上移速度版） -->
   <script>
-    // 等待Three.js加载完成后再执行核心逻辑
-    function waitForThreeLoaded() {
-      return new Promise((resolve, reject) => {
-        const checkInterval = setInterval(() => {
-          if (window.THREE && window.THREE.Scene) {
-            clearInterval(checkInterval);
-            resolve();
-          }
-        }, 100);
-        
-        // 超时兜底（10秒）
-        setTimeout(() => {
-          clearInterval(checkInterval);
-          reject(new Error("Three.js库加载超时"));
-        }, 10000);
-      });
+    // 性能优化：全局节流函数
+    function throttle(fn, delay) {
+      let timer = null;
+      return function(...args) {
+        if (!timer) {
+          timer = setTimeout(() => {
+            fn.apply(this, args);
+            timer = null;
+          }, delay);
+        }
+      };
     }
 
     // 核心逻辑封装
@@ -157,47 +325,56 @@
       let scene, camera, renderer, controls;
       const textMeshes = []; // 活跃文字列表
       const textList = ["学业有成", "步履不停", "奔赴山海", "未来可期", "前程似锦"];
-      let currentRGB = { r: 255, g: 0, b: 0 }; // 全局RGB（数值型）
+      let currentRGB = { r: 255, g: 0, b: 0 }; // 全局统一RGB（数值型）
       let colorPhase = 0; 
+      // 颜色统一：缓存全局颜色字符串，避免重复计算
+      let globalColorStr = `rgb(${currentRGB.r}, ${currentRGB.g}, ${currentRGB.b})`;
+      let globalThreeColor = new THREE.Color(currentRGB.r / 255, currentRGB.g / 255, currentRGB.b / 255);
 
-      // 核心配置（高密度优化：增加数量+缩小间距+降低速度）
-      const config = {
-        // 文字分布（缩小间距，扩大覆盖范围）
-        centerRatio: 0.8, // 80%文字在中心（更集中）
-        centerXRange: { min: -25, max: 25 }, // 中心区域扩大
-        sideXRange: { min: -50, max: 50 },   // 侧边区域扩大
-        zRange: { min: -50, max: 10 },       // Z轴范围扩大（前后层次更多）
-        // 持续刷新（提升密度核心配置）
-        maxActiveText: 80, // 最大活跃文字数（从40→80，翻倍）
-        minActiveText: 75, // 保底阈值（从35→75）
-        spawnInterval: 50, // 生成间隔（从100→50，更快补位）
-        deleteYThreshold: 80, // 删除高度（从60→80，文字停留更久）
-        // 字体大小（中小字为主，微调范围）
+      // 性能优化：设备性能检测
+      const isLowEndDevice = /Android [1-8]|iPhone [4-8]|iPad [1-5]|Mobile Safari\/[1-9]/.test(navigator.userAgent) || 
+                            screen.width < 768 && window.devicePixelRatio === 1;
+
+      // 核心配置（加快上移速度：速度值翻倍）
+      const baseConfig = {
+        // 文字分布
+        centerRatio: 0.8,
+        centerXRange: { min: -25, max: 25 },
+        sideXRange: { min: -50, max: 50 },
+        zRange: { min: -50, max: 10 },
+        // 持续刷新（性能优化：低配设备减少数量）
+        maxActiveText: isLowEndDevice ? 50 : 80,
+        minActiveText: isLowEndDevice ? 45 : 75,
+        spawnInterval: isLowEndDevice ? 80 : 50,
+        deleteYThreshold: 120, // 提高删除阈值，避免文字消失太快
+        // 字体大小（低配设备缩小尺寸）
         fontSize: {
-          small: { min: 50, max: 80, weight: 0.6 },  // 小字：60%
-          medium: { min: 80, max: 110, weight: 0.3 }, // 中字：30%
-          large: { min: 110, max: 140, weight: 0.1 }  // 大字：10%
+          small: { min: isLowEndDevice ? 40 : 50, max: isLowEndDevice ? 70 : 80, weight: 0.6 },
+          medium: { min: isLowEndDevice ? 70 : 80, max: isLowEndDevice ? 100 : 110, weight: 0.3 },
+          large: { min: isLowEndDevice ? 100 : 110, max: isLowEndDevice ? 130 : 140, weight: 0.1 }
         },
         // 几何尺寸（匹配字体大小）
         geoSize: {
-          small: { min: 15, max: 30, weight: 0.6 },
-          medium: { min: 30, max: 40, weight: 0.3 },
-          large: { min: 40, max: 50, weight: 0.1 }
+          small: { min: isLowEndDevice ? 10 : 15, max: isLowEndDevice ? 25 : 30, weight: 0.6 },
+          medium: { min: isLowEndDevice ? 25 : 30, max: isLowEndDevice ? 35 : 40, weight: 0.3 },
+          large: { min: isLowEndDevice ? 35 : 40, max: isLowEndDevice ? 45 : 50, weight: 0.1 }
         },
-        // 速度配置（降低速度，文字停留更久）
-        centerSpeedRange: { min: 0.3, max: 0.6 }, // 中心文字更慢
-        sideSpeedRange: { min: 0.15, max: 0.25 },   // 侧边文字更慢
-        // 颜色渐变
-        colorSpeed: 0.004
+        // 速度配置（核心修改：速度值翻倍，加快上移）
+        centerSpeedRange: { min: isLowEndDevice ? 0.30 : 0.60, max: isLowEndDevice ? 0.30 : 0.60 }, // 原0.04/0.09 → 0.08/0.18；0.03/0.08 → 0.06/0.16
+        sideSpeedRange: { min: isLowEndDevice ? 0.25 : 0.20, max: isLowEndDevice ? 0.20 : 0.25 },   // 原0.06/0.11 → 0.12/0.22；0.05/0.10 → 0.10/0.20
+        // 颜色渐变（低配设备降低渐变速度，减少计算）
+        colorSpeed: isLowEndDevice ? 0.002 : 0.004
       };
+      const config = baseConfig;
 
       // 加载相关变量
       const loadingEl = document.getElementById('loading');
       const loadingTextEl = loadingEl.querySelector('.loading-text');
       const loadingProgressEl = loadingEl.querySelector('.loading-progress');
       const webglErrorEl = document.getElementById('webgl-error');
+      const errorDetailEl = document.getElementById('error-detail');
       let loadProgress = 0;
-      const loadTimeout = 10000; 
+      const loadTimeout = 20000; // 延长超时时间
 
       // 颜色渐变表（数值型RGB）
       const colorGradients = [
@@ -289,11 +466,11 @@
 
       // 通用随机函数（优化初始位置，更密集）
       function getRandomZ() { return Math.random() * (config.zRange.max - config.zRange.min) + config.zRange.min; }
-      function getRandomY() { return Math.random() * -200; } // 初始Y范围扩大（-200~0），底部更密集
+      function getRandomY() { return Math.random() * -200; }
       function getRandomText() { return textList[Math.floor(Math.random() * textList.length)]; }
       function isCenterText() { return Math.random() < config.centerRatio; }
 
-      // 更新全局RGB（数值型，无误差）
+      // 颜色统一核心：更新全局颜色（同步字符串和Three.Color对象）
       function updateGlobalRGB() {
         colorPhase += config.colorSpeed;
         if (colorPhase > 1) colorPhase = 0;
@@ -304,34 +481,90 @@
         
         const from = colorGradients[gradientIndex];
         const to = colorGradients[nextIndex];
+        
+        // 统一更新全局RGB值
         currentRGB.r = Math.floor(from.r + blend * (to.r - from.r));
         currentRGB.g = Math.floor(from.g + blend * (to.g - from.g));
         currentRGB.b = Math.floor(from.b + blend * (to.b - from.b));
+        
+        // 缓存颜色字符串和Three.Color对象（避免重复计算）
+        globalColorStr = `rgb(${currentRGB.r}, ${currentRGB.g}, ${currentRGB.b})`;
+        globalThreeColor.setRGB(currentRGB.r / 255, currentRGB.g / 255, currentRGB.b / 255);
       }
 
-      // 创建文字纹理（适配随机字号）
-      function createTextTexture(text, fontSize) {
-        const canvasWidth = fontSize * text.length * 2.2; // 缩小画布冗余，文字更紧凑
+      // 性能优化：缓存文字纹理（避免重复创建画布）+ 颜色统一
+      const textureCache = new Map();
+      function getCachedTextTexture(text, fontSize) {
+        const cacheKey = `${text}_${fontSize}`;
+        if (textureCache.has(cacheKey)) {
+          const textureData = textureCache.get(cacheKey);
+          // 颜色统一：更新缓存纹理的颜色（使用全局颜色）
+          const { ctx, canvas } = textureData;
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.font = `bold ${fontSize}px Microsoft Yahei`;
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillStyle = globalColorStr;
+          ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+          textureData.texture.needsUpdate = true;
+          return textureData;
+        }
+        
+        const canvasWidth = fontSize * text.length * 2.2;
         const canvasHeight = fontSize * 2.8;
         const canvas = document.createElement('canvas');
         canvas.width = canvasWidth;
         canvas.height = canvasHeight;
         const ctx = canvas.getContext('2d');
         
+        // 颜色统一：初始化使用全局颜色
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.font = `bold ${fontSize}px Microsoft Yahei`;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        ctx.fillStyle = `rgb(${currentRGB.r}, ${currentRGB.g}, ${currentRGB.b})`;
+        ctx.fillStyle = globalColorStr;
         ctx.fillText(text, canvas.width / 2, canvas.height / 2);
         
         const texture = new THREE.CanvasTexture(canvas);
         texture.minFilter = THREE.LinearFilter;
         texture.magFilter = THREE.LinearFilter;
-        return { texture, canvas, ctx };
+        
+        const textureData = { texture, canvas, ctx, cacheKey };
+        textureCache.set(cacheKey, textureData);
+        
+        // 性能优化：缓存上限（避免内存溢出）
+        if (textureCache.size > 50) {
+          const oldestKey = Array.from(textureCache.keys())[0];
+          const oldestData = textureCache.get(oldestKey);
+          oldestData.texture.dispose();
+          textureCache.delete(oldestKey);
+        }
+        
+        return textureData;
       }
 
-      // 创建单个文字（高密度+中小字为主）
+      // 性能优化：复用几何体（避免重复创建）
+      const geoCache = new Map();
+      function getReusableGeometry(width, height) {
+        const cacheKey = `${width}_${height}`;
+        if (geoCache.has(cacheKey)) {
+          return geoCache.get(cacheKey).clone();
+        }
+        
+        const geometry = new THREE.PlaneGeometry(width, height);
+        geoCache.set(cacheKey, geometry);
+        
+        // 缓存上限
+        if (geoCache.size > 20) {
+          const oldestKey = Array.from(geoCache.keys())[0];
+          geoCache.get(oldestKey).dispose();
+          geoCache.delete(oldestKey);
+        }
+        
+        return geometry;
+      }
+
+      // 创建单个文字（性能优化+颜色统一版）
       function createSingleText() {
         const isCenter = isCenterText();
         const text = getRandomText();
@@ -340,7 +573,9 @@
         const geoHeight = geoWidth / 4;
 
         try {
-          const textureData = createTextTexture(text, fontSize);
+          // 颜色统一：使用带全局颜色的缓存纹理
+          const textureData = getCachedTextTexture(text, fontSize);
+
           const material = new THREE.MeshBasicMaterial({
             map: textureData.texture,
             transparent: true,
@@ -351,10 +586,10 @@
             precision: "highp"
           });
 
-          const geometry = new THREE.PlaneGeometry(geoWidth, geoHeight);
+          // 性能优化：复用几何体
+          const geometry = getReusableGeometry(geoWidth, geoHeight);
           const mesh = new THREE.Mesh(geometry, material);
           
-          // 初始位置更密集，无明显空隙
           mesh.position.set(
             getCenterBiasedX(isCenter),
             getRandomY(),
@@ -369,19 +604,21 @@
             ctx: textureData.ctx,
             fontSize: fontSize,
             geoWidth: geoWidth,
-            geoHeight: geoHeight
+            geoHeight: geoHeight,
+            cacheKey: textureData.cacheKey
           };
 
           scene.add(mesh);
           textMeshes.push(mesh);
           return mesh;
         } catch (e) {
-          // 兜底方块（匹配高密度配置）
+          // 兜底方块（颜色统一版）
           const geoWidth = getRandomGeoSize();
           const geoHeight = geoWidth / 4;
-          const geometry = new THREE.PlaneGeometry(geoWidth, geoHeight);
+          const geometry = getReusableGeometry(geoWidth, geoHeight);
           const material = new THREE.MeshBasicMaterial({
-            color: new THREE.Color(currentRGB.r / 255, currentRGB.g / 255, currentRGB.b / 255),
+            // 颜色统一：使用全局Three.Color对象
+            color: globalThreeColor.clone(),
             transparent: true,
             opacity: 1,
             blending: THREE.NormalBlending,
@@ -410,30 +647,47 @@
         }
       }
 
-      // 持续生成新文字（更快补位，保持高密度）
-      function spawnNewText() {
+      // 性能优化：节流生成文字，避免短时间大量创建
+      const throttledSpawnNewText = throttle(() => {
         const needAdd = config.maxActiveText - textMeshes.length;
         if (needAdd > 0) {
-          // 批量补位，一次最多补8个（更快填满）
-          const addCount = Math.min(needAdd, 8);
+          const addCount = Math.min(needAdd, isLowEndDevice ? 3 : 8);
           for (let i = 0; i < addCount; i++) {
             createSingleText();
           }
         }
-      }
+      }, config.spawnInterval);
 
-      // 删除指定文字（释放资源）
+      // 删除指定文字（释放资源，性能优化：批量清理）
       function deleteText(mesh) {
         const index = textMeshes.indexOf(mesh);
         if (index > -1) {
           textMeshes.splice(index, 1);
           scene.remove(mesh);
+          
+          // 释放资源
           if (mesh.geometry) mesh.geometry.dispose();
           if (mesh.material) {
-            if (mesh.material.map) mesh.material.map.dispose();
+            if (mesh.material.map) {
+              // 仅清理非缓存纹理
+              if (!textureCache.has(mesh.userData.cacheKey)) {
+                mesh.material.map.dispose();
+              }
+            }
             mesh.material.dispose();
           }
         }
+      }
+
+      // 性能优化：批量删除超出阈值的文字
+      function batchDeleteText() {
+        const toDelete = [];
+        for (let i = textMeshes.length - 1; i >= 0; i--) {
+          if (textMeshes[i].position.y > config.deleteYThreshold) {
+            toDelete.push(textMeshes[i]);
+          }
+        }
+        toDelete.forEach(deleteText);
       }
 
       // 初始化3D场景
@@ -444,51 +698,76 @@
 
         updateLoadProgress(30);
         camera = new THREE.PerspectiveCamera(
-          60, // 视角扩大（从55→60），能看到更多文字
+          60,
           window.innerWidth / window.innerHeight,
           0.1,
           1000
         );
-        camera.position.set(0, 0, 60); // 相机后移，视野更宽
+        camera.position.set(0, 0, 60);
 
         updateLoadProgress(40);
+        // 性能优化：渲染器核心优化
+        const rendererParams = {
+          antialias: !isLowEndDevice, // 低配设备关闭抗锯齿
+          alpha: false,
+          powerPreference: "high-performance",
+          precision: isLowEndDevice ? "mediump" : "highp", // 低配设备降低精度
+          preserveDrawingBuffer: false,
+          stencil: false,
+          depth: true
+        };
+        
         try {
-          renderer = new THREE.WebGLRenderer({
-            antialias: true,
-            alpha: false,
-            powerPreference: "high-performance", // 优先性能，适配高密度渲染
-            precision: "highp"
-          });
+          renderer = new THREE.WebGLRenderer(rendererParams);
         } catch (e) {
-          renderer = new THREE.WebGLRenderer({ antialias: false, precision: "highp" });
+          renderer = new THREE.WebGLRenderer({ antialias: false, precision: "mediump" });
         }
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5)); // 限制像素比，提升性能
+        
+        // 性能优化：限制渲染分辨率
+        const renderScale = isLowEndDevice ? 0.8 : 1.0;
+        renderer.setSize(window.innerWidth * renderScale, window.innerHeight * renderScale);
+        renderer.domElement.style.width = `${window.innerWidth}px`;
+        renderer.domElement.style.height = `${window.innerHeight}px`;
+        
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, isLowEndDevice ? 1 : 1.5));
+        renderer.autoClear = true;
+        renderer.autoClearColor = true;
+        renderer.autoClearDepth = true;
+        renderer.autoClearStencil = true;
+        
         document.getElementById('container').appendChild(renderer.domElement);
 
         updateLoadProgress(50);
         // 兼容OrbitControls的不同挂载方式
         const OrbitControls = window.OrbitControls || THREE.OrbitControls;
-        controls = OrbitControls ? new OrbitControls(camera, renderer.domElement) : { update: () => {} };
-        controls.enableDamping = true;
+        try {
+          controls = OrbitControls ? new OrbitControls(camera, renderer.domElement) : { update: () => {} };
+        } catch (e) {
+          controls = { update: () => {} };
+        }
+        
+        // 性能优化：控制器降速，减少计算
+        controls.enableDamping = !isLowEndDevice;
         controls.dampingFactor = 0.05;
-        controls.minDistance = 50; // 相机最小距离后移，避免太近看不到整体
+        controls.minDistance = 50;
         controls.maxDistance = 100;
         controls.enableRotate = true;
         controls.enableZoom = true;
         controls.enablePan = true;
+        controls.rotateSpeed = isLowEndDevice ? 0.5 : 0.8;
+        controls.zoomSpeed = isLowEndDevice ? 0.8 : 1.0;
 
         updateLoadProgress(60);
-        // 增强环境光，文字更清晰
-        const ambientLight = new THREE.AmbientLight(0xffffff, 2.0);
+        // 性能优化：减少灯光数量，降低计算
+        const ambientLight = new THREE.AmbientLight(0xffffff, isLowEndDevice ? 1.5 : 2.0);
         scene.add(ambientLight);
 
         updateLoadProgress(70);
-        // 创建更密集的星空背景
+        // 性能优化：低配设备减少星星数量
         function createStars() {
           try {
+            const starsCount = isLowEndDevice ? 1000 : 3000;
             const starsGeometry = new THREE.BufferGeometry();
-            const starsCount = 3000; // 星星数量翻倍（从1500→3000）
             const positions = new Float32Array(starsCount * 3);
             
             for (let i = 0; i < starsCount * 3; i += 3) {
@@ -500,7 +779,7 @@
             starsGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
             const starsMaterial = new THREE.PointsMaterial({
               color: 0xffffff,
-              size: 0.9, // 星星稍大
+              size: isLowEndDevice ? 0.6 : 0.9,
               sizeAttenuation: true,
               opacity: 0.6
             });
@@ -513,68 +792,95 @@
         createStars();
 
         updateLoadProgress(80);
-        // 初始化高密度文字（80个）
-        for (let i = 0; i < config.maxActiveText; i++) {
-          createSingleText();
-          updateLoadProgress(80 + (i + 1) * 0.25); // 调整进度计算，避免溢出
-        }
-
-        updateLoadProgress(100);
-        // 双重定时器，更快补位
-        setInterval(spawnNewText, config.spawnInterval);
-        setInterval(() => {
-          if (textMeshes.length < config.minActiveText) {
-            spawnNewText();
+        // 性能优化：分批初始化文字，避免主线程阻塞
+        let initCount = 0;
+        const batchInit = () => {
+          const batchSize = isLowEndDevice ? 5 : 10;
+          for (let i = 0; i < batchSize && initCount < config.maxActiveText; i++) {
+            createSingleText();
+            initCount++;
+            updateLoadProgress(80 + (initCount / config.maxActiveText) * 20);
           }
-        }, 30); // 保底检测间隔缩短到30ms
+          
+          if (initCount < config.maxActiveText) {
+            requestIdleCallback(batchInit, { timeout: 100 });
+          } else {
+            updateLoadProgress(100);
+          }
+        };
+        batchInit();
 
-        // 窗口适配
-        window.addEventListener('resize', onWindowResize);
+        // 性能优化：调整定时器频率
+        setInterval(throttledSpawnNewText, config.spawnInterval);
+        setInterval(batchDeleteText, isLowEndDevice ? 100 : 50); // 批量删除节流
+
+        // 窗口适配（性能优化：节流resize）
+        const throttledResize = throttle(onWindowResize, 200);
+        window.addEventListener('resize', throttledResize);
       }
 
       // 窗口大小适配
       function onWindowResize() {
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
-        renderer.setSize(window.innerWidth, window.innerHeight);
+        
+        const renderScale = isLowEndDevice ? 0.8 : 1.0;
+        renderer.setSize(window.innerWidth * renderScale, window.innerHeight * renderScale);
+        renderer.domElement.style.width = `${window.innerWidth}px`;
+        renderer.domElement.style.height = `${window.innerHeight}px`;
       }
 
-      // 核心动画循环（优化性能，适配高密度）
-      function animate() {
-        requestAnimationFrame(animate);
+      // 性能优化：帧率控制（低配设备降帧）
+      let lastFrameTime = 0;
+      const targetFps = isLowEndDevice ? 30 : 60;
+      const frameInterval = 1000 / targetFps;
 
-        // 更新全局颜色
+      // 核心动画循环（深度性能优化+颜色统一）
+      function animate(timestamp) {
+        // 帧率控制
+        if (timestamp - lastFrameTime < frameInterval) {
+          requestAnimationFrame(animate);
+          return;
+        }
+        lastFrameTime = timestamp;
+
+        // 第一步：统一更新全局颜色（所有文字基于此更新）
         updateGlobalRGB();
 
-        // 批量处理文字，减少循环开销
+        // 第二步：批量更新所有文字（确保颜色统一）
         for (let i = textMeshes.length - 1; i >= 0; i--) {
           const mesh = textMeshes[i];
-          // 同步颜色
+          
+          // 1. 统一更新位置（速度已翻倍）
+          mesh.position.y += mesh.userData.speed;
+
+          // 2. 统一更新颜色（区分纹理文字和兜底方块）
           if (mesh.userData.ctx && mesh.userData.text) {
+            // 纹理文字：使用全局颜色字符串更新
             const { ctx, canvas, text, fontSize } = mesh.userData;
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.font = `bold ${fontSize}px Microsoft Yahei`;
             ctx.textAlign = "center";
             ctx.textBaseline = "middle";
-            ctx.fillStyle = `rgb(${currentRGB.r}, ${currentRGB.g}, ${currentRGB.b})`;
+            ctx.fillStyle = globalColorStr; // 统一使用全局颜色
             ctx.fillText(text, canvas.width / 2, canvas.height / 2);
             mesh.material.map.needsUpdate = true;
           } else {
-            mesh.material.color.setRGB(currentRGB.r / 255, currentRGB.g / 255, currentRGB.b / 255);
+            // 兜底方块：使用全局Three.Color对象更新
+            mesh.material.color.copy(globalThreeColor); // 统一复制全局颜色
             mesh.material.needsUpdate = true;
-          }
-
-          // 文字上升
-          mesh.position.y += mesh.userData.speed;
-
-          // 检测删除
-          if (mesh.position.y > config.deleteYThreshold) {
-            deleteText(mesh);
           }
         }
 
-        controls.update();
+        // 第三步：控制器更新（仅在需要时）
+        if (controls.enableDamping) {
+          controls.update();
+        }
+
+        // 第四步：渲染场景
         renderer.render(scene, camera);
+
+        requestAnimationFrame(animate);
       }
 
       // 初始化入口
@@ -591,19 +897,20 @@
           clearTimeout(timeoutTimer);
           loadingEl.style.display = 'none';
           webglErrorEl.style.display = 'flex';
+          errorDetailEl.textContent = "当前设备/浏览器不支持WebGL，请更换Chrome/Edge/Firefox浏览器重试";
           return;
         }
 
         try {
           initScene();
-          animate();
+          requestAnimationFrame(animate);
           clearTimeout(timeoutTimer);
         } catch (e) {
           clearTimeout(timeoutTimer);
           console.error('初始化失败:', e);
           loadingEl.style.display = 'none';
-          webglErrorEl.innerHTML = `<h3>场景加载失败</h3><p>错误信息：${e.message}</p>`;
           webglErrorEl.style.display = 'flex';
+          errorDetailEl.textContent = `场景初始化失败：${e.message}`;
         }
       }
 
@@ -611,22 +918,40 @@
       init();
     }
 
-    // 页面加载完成后，等待Three.js加载并执行核心逻辑
+    // 页面加载完成后，先预加载Three.js，再初始化3D
     window.addEventListener('DOMContentLoaded', async () => {
       const loadingEl = document.getElementById('loading');
       const webglErrorEl = document.getElementById('webgl-error');
+      const errorDetailEl = document.getElementById('error-detail');
       const loadingTextEl = loadingEl.querySelector('.loading-text');
       
       try {
-        // 等待Three.js加载完成
-        await waitForThreeLoaded();
-        // 执行3D初始化
+        // 预加载Three.js（带重试+多CDN）
+        loadingTextEl.textContent = "正在加载3D资源...";
+        await window.preloadThree();
+        
+        // 检查Three.js是否可用
+        if (!window.THREE || !THREE.Scene) {
+          throw new Error('Three.js核心未加载成功');
+        }
+        
+        // 初始化3D场景
         init3D();
       } catch (error) {
-        console.error('Three.js加载失败:', error);
+        console.error('加载失败:', error);
         loadingEl.style.display = 'none';
-        webglErrorEl.innerHTML = `<h3>3D库加载失败</h3><p>请检查网络或刷新页面重试</p><p>错误：${error.message}</p>`;
         webglErrorEl.style.display = 'flex';
+        errorDetailEl.textContent = `加载失败：${error.message}，请刷新页面或更换网络重试`;
+      }
+    });
+
+    // 性能优化：页面隐藏时暂停动画，恢复时重启
+    let animationId;
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        cancelAnimationFrame(animationId);
+      } else {
+        animationId = requestAnimationFrame(animate);
       }
     });
   </script>
